@@ -38,6 +38,8 @@ jobs:
           java-version: '17'
       - name: Install JavaScript dependencies
         run: npm install
+      - name: Ensure Expo Router bundle dependency is installed
+        run: npm install query-string@7.1.3 --save
       - name: Validate Expo dependency versions
         run: npx expo install --check
       - name: Generate native Android project

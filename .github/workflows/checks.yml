@@ -38,11 +38,13 @@ jobs:
           java-version: '17'
       - name: Install JavaScript dependencies
         run: npm install
+      - name: Validate Expo dependency versions
+        run: npx expo install --check
       - name: Generate native Android project
-        run: npx expo prebuild --platform android --no-install
+        run: npx expo prebuild --platform android --clean
       - name: Build debug APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --no-daemon
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:

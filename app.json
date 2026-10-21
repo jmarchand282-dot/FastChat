@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "FastChat",
+    "slug": "fastchat",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "fastchat",
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.fastchat.app"
+    },
+    "android": {
+      "package": "com.fastchat.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#4F46E5"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

@@ -1,5 +1,19 @@
-import { useState } from "react";
-import { SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
+} from "react-native";
+import type { Session } from "@supabase/supabase-js";
+import { isSupabaseConfigured, supabase } from "../src/lib/supabase";
 
 const colors = {
   primary: "#4F46E5",
@@ -12,173 +26,248 @@ const colors = {
   green: "#16A34A"
 };
 
-const previewChats = [
-  { name: "Maya Johnson", message: "Are we still meeting today?", time: "09:41", initials: "MJ", color: "#FDE7D8", unread: 2 },
-  { name: "Study Group", message: "Patrick: I shared the notes.", time: "08:56", initials: "SG", color: "#DDEBFF", unread: 4 },
-  { name: "Daniel Kim", message: "Thanks! Talk to you soon.", time: "Yesterday", initials: "DK", color: "#E7DDFD", unread: 0 },
-  { name: "Amina Said", message: "Voice message · 0:18", time: "Yesterday", initials: "AS", color: "#DDF7E8", unread: 0 }
-];
-
 export default function HomeScreen() {
-  const [tab, setTab] = useState("Chats");
-  const [query, setQuery] = useState("");
-  const tabs = ["Chats", "Statuses", "Contacts", "Settings"];
-  const visibleChats = previewChats.filter((chat) =>
-    (chat.name + " " + chat.message).toLowerCase().includes(query.toLowerCase())
-  );
+  const [session, setSession] = useState<Session | null>(null);
+  const [loadingSession, setLoadingSession] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<"signin" | "signup">("signup");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+
+  useEffect(() => {
+    if (!supabase) {
+      setLoadingSession(false);
+      return;
+    }
+
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setLoadingSession(false);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  async function submitAuth() {
+    if (!supabase) {
+      Alert.alert("Configuration nécessaire", "FastChat doit d’abord être relié à Supabase avec l’URL du projet et la clé publique anon.");
+      return;
+    }
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes("@")) {
+      Alert.alert("Adresse e-mail", "Entre une adresse e-mail valide.");
+      return;
+    }
+    if (password.length < 6) {
+      Alert.alert("Mot de passe", "Utilise au moins 6 caractères.");
+      return;
+    }
+    if (mode === "signup" && !displayName.trim()) {
+      Alert.alert("Nom affiché", "Entre le nom que les autres pourront voir.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      if (mode === "signup") {
+        const { data, error } = await supabase.auth.signUp({
+          email: cleanEmail,
+          password,
+          options: { data: { display_name: displayName.trim() } }
+        });
+        if (error) throw error;
+        if (data.session) {
+          Alert.alert("Bienvenue sur FastChat", "Ton compte est créé.");
+        } else {
+          Alert.alert("Vérifie ta boîte e-mail", "Supabase a créé la demande de compte. Ouvre l’e-mail de confirmation si la confirmation est activée dans ton projet.");
+          setMode("signin");
+        }
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password
+        });
+        if (error) throw error;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Une erreur inattendue est survenue.";
+      Alert.alert("Impossible de continuer", message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function signOut() {
+    if (!supabase) return;
+    const { error } = await supabase.auth.signOut();
+    if (error) Alert.alert("Erreur", error.message);
+  }
+
+  if (loadingSession) {
+    return (
+      <SafeAreaView style={styles.loading}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={styles.loadingText}>Ouverture de FastChat…</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (session) {
+    const name = String(session.user.user_metadata?.display_name || session.user.email || "Utilisateur");
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.header}>
+          <View style={styles.brandRow}>
+            <View style={styles.logo}><Text style={styles.logoText}>FC</Text></View>
+            <View>
+              <Text style={styles.brand}>FastChat</Text>
+              <Text style={styles.tagline}>Restez proches, où que vous soyez.</Text>
+            </View>
+          </View>
+        </View>
+        <View style={styles.signedIn}>
+          <View style={styles.avatar}><Text style={styles.avatarText}>{name.slice(0, 1).toUpperCase()}</Text></View>
+          <Text style={styles.title}>Bienvenue, {name} !</Text>
+          <Text style={styles.subtitle}>Ton compte est connecté.</Text>
+          <View style={styles.infoCard}>
+            <Text style={styles.infoTitle}>Prochaine étape</Text>
+            <Text style={styles.infoText}>Nous allons maintenant relier le profil, les contacts et les conversations aux tables Supabase. Les discussions ne sont pas encore actives.</Text>
+          </View>
+          <TouchableOpacity style={styles.secondaryButton} onPress={signOut}>
+            <Text style={styles.secondaryButtonText}>Se déconnecter</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
-        <View style={styles.brandRow}>
-          <View style={styles.logo}><Text style={styles.logoText}>FC</Text></View>
-          <View>
-            <Text style={styles.brand}>FastChat</Text>
-            <Text style={styles.tagline}>Stay close, anywhere.</Text>
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <View style={styles.brandBlock}>
+            <View style={styles.logoLarge}><Text style={styles.logoText}>FC</Text></View>
+            <Text style={styles.brandLarge}>FastChat</Text>
+            <Text style={styles.tagline}>Restez proches, où que vous soyez.</Text>
           </View>
-          <View style={styles.headerSpacer} />
-          <TouchableOpacity accessibilityLabel="New message" style={styles.newButton} onPress={() => setTab("Contacts")}>
-            <Text style={styles.newButtonText}>＋</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <View style={styles.welcome}>
-          <Text style={styles.eyebrow}>YOUR WORLD, CONNECTED</Text>
-          <Text style={styles.title}>Good morning 👋</Text>
-          <Text style={styles.subtitle}>Your conversations, all in one place.</Text>
-        </View>
-
-        <View style={styles.searchBox}>
-          <Text style={styles.searchIcon}>⌕</Text>
-          <TextInput
-            accessibilityLabel="Search conversations"
-            placeholder="Search conversations..."
-            placeholderTextColor={colors.muted}
-            value={query}
-            onChangeText={setQuery}
-            style={styles.searchInput}
-          />
-        </View>
-
-        <View style={styles.quickRow}>
-          <TouchableOpacity style={styles.quickCard} onPress={() => setTab("Statuses")}>
-            <View style={[styles.quickIcon, { backgroundColor: "#E9E7FF" }]}><Text style={styles.quickEmoji}>◉</Text></View>
-            <Text style={styles.quickTitle}>Statuses</Text>
-            <Text style={styles.quickSub}>See updates</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickCard} onPress={() => setTab("Contacts")}>
-            <View style={[styles.quickIcon, { backgroundColor: "#DFF7EA" }]}><Text style={styles.quickEmoji}>＋</Text></View>
-            <Text style={styles.quickTitle}>New chat</Text>
-            <Text style={styles.quickSub}>Find people</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.sectionRow}>
-          <Text style={styles.sectionTitle}>{tab === "Chats" ? "Recent chats" : tab}</Text>
-          <Text style={styles.sectionMeta}>{tab === "Chats" ? "SEE ALL" : "PREVIEW"}</Text>
-        </View>
-
-        {tab === "Chats" ? visibleChats.map((chat) => (
-          <TouchableOpacity key={chat.name} style={styles.chatRow} onPress={() => {}}>
-            <View style={[styles.avatar, { backgroundColor: chat.color }]}><Text style={styles.avatarText}>{chat.initials}</Text></View>
-            <View style={styles.chatBody}>
-              <View style={styles.chatTop}>
-                <Text style={styles.chatName}>{chat.name}</Text>
-                <Text style={styles.time}>{chat.time}</Text>
-              </View>
-              <View style={styles.chatBottom}>
-                <Text style={styles.message} numberOfLines={1}>{chat.message}</Text>
-                {chat.unread > 0 && <View style={styles.unread}><Text style={styles.unreadText}>{chat.unread}</Text></View>}
-              </View>
+          {!isSupabaseConfigured && (
+            <View style={styles.warning}>
+              <Text style={styles.warningTitle}>Connexion à configurer</Text>
+              <Text style={styles.warningText}>L’écran est prêt, mais l’URL Supabase et la clé publique anon ne sont pas encore configurées dans l’environnement de l’application.</Text>
             </View>
-          </TouchableOpacity>
-        )) : (
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIcon}><Text style={styles.emptyEmoji}>{tab === "Statuses" ? "◉" : tab === "Contacts" ? "♙" : "⚙"}</Text></View>
-            <Text style={styles.emptyTitle}>{tab}</Text>
-            <Text style={styles.emptyText}>
-              {tab === "Statuses" ? "Status updates will appear here when this feature is connected." :
-               tab === "Contacts" ? "Contact discovery and new conversations will be added in the next development step." :
-               "Language, privacy, notifications, and account options will be available here."}
-            </Text>
-            <TouchableOpacity style={styles.backButton} onPress={() => setTab("Chats")}><Text style={styles.backButtonText}>Back to chats</Text></TouchableOpacity>
-          </View>
-        )}
-        <View style={styles.notice}>
-          <Text style={styles.noticeTitle}>Early preview</Text>
-          <Text style={styles.noticeText}>These sample conversations are demonstration content. Online accounts and real messaging are not connected yet.</Text>
-        </View>
-      </ScrollView>
+          )}
 
-      <View style={styles.bottomNav}>
-        {tabs.map((item, index) => (
-          <TouchableOpacity key={item} onPress={() => setTab(item)} style={styles.navItem}>
-            <Text style={[styles.navIcon, tab === item && styles.navIconActive]}>{["▣", "◉", "♙", "⚙"][index]}</Text>
-            <Text style={[styles.navLabel, tab === item && styles.navLabelActive]}>{item}</Text>
-            {tab === item && <View style={styles.activeDot} />}
-          </TouchableOpacity>
-        ))}
-      </View>
+          <View style={styles.formCard}>
+            <Text style={styles.title}>{mode === "signup" ? "Créer un compte" : "Heureux de te revoir"}</Text>
+            <Text style={styles.subtitle}>{mode === "signup" ? "Rejoins FastChat gratuitement." : "Connecte-toi pour retrouver ton compte."}</Text>
+
+            {mode === "signup" && (
+              <View style={styles.field}>
+                <Text style={styles.label}>Nom affiché</Text>
+                <TextInput
+                  accessibilityLabel="Nom affiché"
+                  value={displayName}
+                  onChangeText={setDisplayName}
+                  placeholder="Ex. Amina"
+                  placeholderTextColor="#999BB0"
+                  style={styles.input}
+                  autoCapitalize="words"
+                  maxLength={60}
+                />
+              </View>
+            )}
+
+            <View style={styles.field}>
+              <Text style={styles.label}>Adresse e-mail</Text>
+              <TextInput
+                accessibilityLabel="Adresse e-mail"
+                value={email}
+                onChangeText={setEmail}
+                placeholder="toi@exemple.com"
+                placeholderTextColor="#999BB0"
+                style={styles.input}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                textContentType="emailAddress"
+              />
+            </View>
+
+            <View style={styles.field}>
+              <Text style={styles.label}>Mot de passe</Text>
+              <TextInput
+                accessibilityLabel="Mot de passe"
+                value={password}
+                onChangeText={setPassword}
+                placeholder="6 caractères minimum"
+                placeholderTextColor="#999BB0"
+                style={styles.input}
+                secureTextEntry
+                autoCapitalize="none"
+                textContentType={mode === "signup" ? "newPassword" : "password"}
+              />
+            </View>
+
+            <TouchableOpacity style={[styles.primaryButton, busy && styles.buttonDisabled]} onPress={submitAuth} disabled={busy}>
+              {busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryButtonText}>{mode === "signup" ? "Créer mon compte" : "Se connecter"}</Text>}
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.modeButton} onPress={() => setMode(mode === "signup" ? "signin" : "signup")} disabled={busy}>
+              <Text style={styles.modeText}>
+                {mode === "signup" ? "Tu as déjà un compte ? Se connecter" : "Nouveau sur FastChat ? Créer un compte"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.privacyNote}>Ton mot de passe est envoyé directement au service d’authentification Supabase. Ne le partage avec personne.</Text>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   safe: { flex: 1, backgroundColor: colors.background },
-  header: { backgroundColor: colors.white, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
+  loading: { flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" },
+  loadingText: { marginTop: 12, color: colors.muted, fontSize: 14 },
+  header: { backgroundColor: colors.white, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
   brandRow: { flexDirection: "row", alignItems: "center" },
   logo: { width: 46, height: 46, borderRadius: 16, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center", marginRight: 12 },
-  logoText: { color: colors.white, fontSize: 15, fontWeight: "900", letterSpacing: -1 },
-  brand: { color: colors.ink, fontSize: 21, fontWeight: "800", letterSpacing: -0.5 },
-  tagline: { color: colors.muted, fontSize: 12, marginTop: 2 },
-  headerSpacer: { flex: 1 },
-  newButton: { width: 42, height: 42, borderRadius: 14, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },
-  newButtonText: { color: colors.white, fontSize: 27, lineHeight: 30, fontWeight: "400" },
-  content: { padding: 20, paddingBottom: 30 },
-  welcome: { marginTop: 8, marginBottom: 22 },
-  eyebrow: { color: colors.violet, fontSize: 10, fontWeight: "800", letterSpacing: 1.5, marginBottom: 8 },
-  title: { color: colors.ink, fontSize: 27, fontWeight: "800", letterSpacing: -0.7 },
-  subtitle: { color: colors.muted, fontSize: 14, marginTop: 6 },
-  searchBox: { flexDirection: "row", alignItems: "center", backgroundColor: colors.white, borderRadius: 15, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, height: 50, marginBottom: 18 },
-  searchIcon: { color: colors.muted, fontSize: 27, marginRight: 9 },
-  searchInput: { flex: 1, color: colors.ink, fontSize: 14 },
-  quickRow: { flexDirection: "row", gap: 12, marginBottom: 28 },
-  quickCard: { flex: 1, backgroundColor: colors.white, borderRadius: 18, padding: 14, borderWidth: 1, borderColor: colors.border },
-  quickIcon: { width: 38, height: 38, borderRadius: 13, alignItems: "center", justifyContent: "center", marginBottom: 12 },
-  quickEmoji: { fontSize: 22, color: colors.primary, fontWeight: "700" },
-  quickTitle: { color: colors.ink, fontSize: 14, fontWeight: "800" },
-  quickSub: { color: colors.muted, fontSize: 11, marginTop: 4 },
-  sectionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
-  sectionTitle: { color: colors.ink, fontSize: 18, fontWeight: "800" },
-  sectionMeta: { color: colors.violet, fontSize: 10, fontWeight: "800", letterSpacing: 0.8 },
-  chatRow: { flexDirection: "row", alignItems: "center", paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.border },
-  avatar: { width: 48, height: 48, borderRadius: 17, alignItems: "center", justifyContent: "center", marginRight: 12 },
-  avatarText: { color: colors.ink, fontSize: 13, fontWeight: "800" },
-  chatBody: { flex: 1 },
-  chatTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
-  chatName: { color: colors.ink, fontSize: 14, fontWeight: "700" },
-  time: { color: colors.muted, fontSize: 10 },
-  chatBottom: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  message: { color: colors.muted, fontSize: 12, flex: 1, marginRight: 8 },
-  unread: { backgroundColor: colors.green, minWidth: 19, height: 19, borderRadius: 10, alignItems: "center", justifyContent: "center", paddingHorizontal: 5 },
-  unreadText: { color: colors.white, fontSize: 10, fontWeight: "800" },
-  emptyState: { backgroundColor: colors.white, borderRadius: 20, borderWidth: 1, borderColor: colors.border, alignItems: "center", padding: 24, marginTop: 4 },
-  emptyIcon: { width: 58, height: 58, borderRadius: 20, backgroundColor: "#E9E7FF", alignItems: "center", justifyContent: "center", marginBottom: 12 },
-  emptyEmoji: { fontSize: 25, color: colors.primary },
-  emptyTitle: { color: colors.ink, fontSize: 18, fontWeight: "800" },
-  emptyText: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center", marginTop: 8 },
-  backButton: { marginTop: 16, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 16 },
-  backButtonText: { color: colors.white, fontSize: 12, fontWeight: "700" },
-  notice: { marginTop: 25, backgroundColor: "#EEEDFF", borderRadius: 15, padding: 14 },
-  noticeTitle: { color: colors.primary, fontSize: 12, fontWeight: "800", marginBottom: 4 },
-  noticeText: { color: "#575779", fontSize: 11, lineHeight: 17 },
-  bottomNav: { flexDirection: "row", justifyContent: "space-around", backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10, paddingBottom: 7 },
-  navItem: { flex: 1, alignItems: "center", paddingVertical: 3 },
-  navIcon: { color: "#9A9CB0", fontSize: 20, marginBottom: 4 },
-  navIconActive: { color: colors.primary },
-  navLabel: { color: "#9A9CB0", fontSize: 10, fontWeight: "600" },
-  navLabelActive: { color: colors.primary, fontWeight: "800" },
-  activeDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: colors.primary, marginTop: 4 }
+  logoLarge: { width: 66, height: 66, borderRadius: 22, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center", marginBottom: 12 },
+  logoText: { color: colors.white, fontSize: 18, fontWeight: "900", letterSpacing: -1 },
+  brand: { color: colors.ink, fontSize: 21, fontWeight: "800" },
+  brandLarge: { color: colors.ink, fontSize: 30, fontWeight: "900", letterSpacing: -1 },
+  tagline: { color: colors.muted, fontSize: 12, marginTop: 4 },
+  content: { padding: 22, paddingBottom: 35, flexGrow: 1, justifyContent: "center" },
+  brandBlock: { alignItems: "center", marginBottom: 26 },
+  warning: { backgroundColor: "#FFF4D9", borderColor: "#F5D98A", borderWidth: 1, borderRadius: 14, padding: 13, marginBottom: 16 },
+  warningTitle: { color: "#805B00", fontWeight: "800", fontSize: 13, marginBottom: 4 },
+  warningText: { color: "#735B20", fontSize: 12, lineHeight: 18 },
+  formCard: { backgroundColor: colors.white, borderRadius: 22, borderWidth: 1, borderColor: colors.border, padding: 20 },
+  title: { color: colors.ink, fontSize: 23, fontWeight: "900", letterSpacing: -0.5 },
+  subtitle: { color: colors.muted, fontSize: 13, lineHeight: 19, marginTop: 7, marginBottom: 20 },
+  field: { marginBottom: 15 },
+  label: { color: colors.ink, fontSize: 12, fontWeight: "800", marginBottom: 7 },
+  input: { height: 49, borderRadius: 13, borderWidth: 1, borderColor: colors.border, backgroundColor: "#FCFCFF", paddingHorizontal: 13, color: colors.ink, fontSize: 14 },
+  primaryButton: { height: 50, backgroundColor: colors.primary, borderRadius: 14, alignItems: "center", justifyContent: "center", marginTop: 5 },
+  buttonDisabled: { opacity: 0.65 },
+  primaryButtonText: { color: colors.white, fontSize: 14, fontWeight: "800" },
+  modeButton: { paddingVertical: 15, alignItems: "center" },
+  modeText: { color: colors.violet, fontSize: 12, fontWeight: "800", textAlign: "center" },
+  privacyNote: { color: colors.muted, fontSize: 11, lineHeight: 17, textAlign: "center", marginTop: 18, paddingHorizontal: 8 },
+  signedIn: { flex: 1, padding: 24, alignItems: "center", justifyContent: "center" },
+  avatar: { width: 74, height: 74, borderRadius: 26, backgroundColor: "#E9E7FF", alignItems: "center", justifyContent: "center", marginBottom: 18 },
+  avatarText: { color: colors.primary, fontSize: 30, fontWeight: "900" },
+  infoCard: { width: "100%", backgroundColor: colors.white, borderRadius: 17, padding: 17, marginTop: 24, borderWidth: 1, borderColor: colors.border },
+  infoTitle: { color: colors.ink, fontSize: 14, fontWeight: "900", marginBottom: 7 },
+  infoText: { color: colors.muted, fontSize: 13, lineHeight: 20 },
+  secondaryButton: { width: "100%", marginTop: 18, padding: 14, borderRadius: 13, alignItems: "center", borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white },
+  secondaryButtonText: { color: colors.ink, fontSize: 13, fontWeight: "800" }
 });

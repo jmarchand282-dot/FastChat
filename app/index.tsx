@@ -130,19 +130,27 @@ export default function HomeScreen() {
   }
 
   async function choosePhoto() {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert("Autorisation nécessaire", "Autorise FastChat à accéder aux photos pour choisir une photo de profil.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8
-    });
-    if (!result.canceled && result.assets[0]) {
-      setLocalPhotoUri(result.assets[0].uri);
+    try {
+      // Android's system photo picker does not require broad gallery permission.
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8
+      });
+      if (result.canceled) return;
+      const asset = result.assets?.[0];
+      if (!asset?.uri) {
+        Alert.alert("Photo non sélectionnée", "Choisis une image puis valide la sélection.");
+        return;
+      }
+      setLocalPhotoUri(asset.uri);
+      setAvatarUrl(null);
+    } catch (error) {
+      Alert.alert(
+        "Ouverture de la galerie impossible",
+        error instanceof Error ? error.message : "Une erreur est survenue en ouvrant la galerie."
+      );
     }
   }
 
@@ -213,7 +221,7 @@ export default function HomeScreen() {
             <Text style={styles.subtitle}>Ajoute ta photo et vérifie les informations que les autres verront.</Text>
             {profileLoading ? <ActivityIndicator color={colors.primary} /> : null}
             <TouchableOpacity style={styles.photoPicker} onPress={choosePhoto} disabled={busy}>
-              {shownPhoto ? <Image source={{ uri: shownPhoto }} style={styles.avatarImage} /> : <View style={styles.avatar}><Text style={styles.avatarText}>{name.slice(0, 1).toUpperCase() || "?"}</Text></View>}
+              {shownPhoto ? <Image source={{ uri: shownPhoto }} style={styles.avatarImage} onError={() => { Alert.alert("Affichage de la photo impossible", "La photo a été sélectionnée, mais Android n’arrive pas à l’afficher. Réessaie avec une autre image."); setLocalPhotoUri(null); }} /> : <View style={styles.avatar}><Text style={styles.avatarText}>{name.slice(0, 1).toUpperCase() || "?"}</Text></View>}
               <Text style={styles.photoAction}>Choisir une photo</Text>
               <Text style={styles.photoHint}>Appuie ici pour ouvrir la galerie</Text>
             </TouchableOpacity>

@@ -36,7 +36,14 @@ export default function RecoveryScreen() {
 
   useEffect(() => {
     async function handleRecoveryUrl(url: string | null) {
-      if (!url || handledUrls.current.has(url)) return;
+      if (!url) {
+        // The app may open this route before Android delivers the deep link.
+        // Never leave the recovery screen spinning when no URL is available yet.
+        setCheckingLink(false);
+        setValidLink(false);
+        return;
+      }
+      if (handledUrls.current.has(url)) return;
       handledUrls.current.add(url);
       try {
         const parsed = new URL(url);

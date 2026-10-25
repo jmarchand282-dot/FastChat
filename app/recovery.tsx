@@ -33,88 +33,131 @@ export default function RecoveryScreen() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const handledUrls = useRef(new Set<string>());
-  const routeParams = useLocalSearchParams<{ code?: string | string[]; access_token?: string | string[]; refresh_token?: string | string[]; type?: string | string[]; error_description?: string | string[] }>();
+  const routeParams = useLocalSearchParams<{
+    code?: string | string[];
+    token_hash?: string | string[];
+    access_token?: string | string[];
+    refresh_token?: string | string[];
+    type?: string | string[];
+    error?: string | string[];
+    error_code?: string | string[];
+    error_description?: string | string[];
+  }>();
 
   useEffect(() => {
-    async function handleRecoveryUrl(url: string | null) {
-      if (!url) {
-        // The app may open this route before Android delivers the deep link.
-        // Never leave the recovery screen spinning when no URL is available yet.
-        setCheckingLink(false);
-        setValidLink(false);
-        return;
-      }
-      if (handledUrls.current.has(url)) return;
-      handledUrls.current.add(url);
-      try {
-        const parsed = new URL(url);
-        const fragment = new URLSearchParams(parsed.hash.replace(/^#/, ""));
-        const query = parsed.searchParams;
-        const errorDescription = query.get("error_description") || fragment.get("error_description");
-        if (errorDescription) throw new Error(errorDescription.replace(/\+/g, " "));
+    let mounted = true;
 
-        const code = query.get("code") || fragment.get("code");
-        if (code && supabase) {
+    async function handleRecoveryUrl(url: string | null) {
+      if (!url || !mounted || handledUrls.current.has(url)) return;
+      handledUrls.current.add(url);
+
+      try {
+        // Parse both the query string and fragment. Some email clients/browser
+        // combinations deliver the recovery data in different parts of the URL.
+        const parsed = new URL(url);
+        const query = new URLSearchParams(parsed.search.replace(/^\?/, ""));
+        const fragment = new URLSearchParams(parsed.hash.replace(/^#/, ""));
+        const get = (key: string) => query.get(key) || fragment.get(key);
+        const errorDescription = get("error_description") || get("error");
+        if (errorDescription) {
+          throw new Error(errorDescription.replace(/\+/g, " "));
+        }
+        if (!supabase) throw new Error("FastChat n’est pas relié à Supabase.");
+
+        const code = get("code");
+        if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
-          setValidLink(true);
-          setCheckingLink(false);
+          if (mounted) setValidLink(true);
           return;
         }
 
-        const accessToken = fragment.get("access_token") || query.get("access_token");
-        const refreshToken = fragment.get("refresh_token") || query.get("refresh_token");
-        const type = fragment.get("type") || query.get("type");
-        if (!supabase || !accessToken || !refreshToken || type !== "recovery") {
-          throw new Error("Le lien est incomplet ou a expiré. Demande un nouvel e-mail de récupération.");
+        // Support links that deliver the email OTP token hash directly.
+        const tokenHash = get("token_hash");
+        const tokenType = get("type");
+        if (tokenHash && tokenType === "recovery") {
+          const { error } = await supabase.auth.verifyOtp({
+            token_hash: tokenHash,
+            type: "recovery"
+          });
+          if (error) throw error;
+          if (mounted) setValidLink(true);
+          return;
         }
-        const { error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken
-        });
-        if (error) throw error;
-        setValidLink(true);
-      } catch (error) {
-        Alert.alert(
-          "Lien de récupération invalide",
-          error instanceof Error ? error.message : "Ouvre le lien reçu par e-mail sur ce téléphone, puis réessaie."
+
+        const accessToken = get("access_token");
+        const refreshToken = get("refresh_token");
+        if (accessToken && refreshToken && tokenType === "recovery") {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken
+          });
+          if (error) throw error;
+          if (mounted) setValidLink(true);
+          return;
+        }
+
+        throw new Error(
+          "FastChat n’a reçu aucun code de récupération utilisable. Demande un nouvel e-mail et ouvre son lien sur ce téléphone."
         );
-        setValidLink(false);
+      } catch (error) {
+        if (mounted) {
+          Alert.alert(
+            "Lien de récupération invalide",
+            error instanceof Error ? error.message : "Ouvre le lien reçu par e-mail sur ce téléphone, puis réessaie."
+          );
+          setValidLink(false);
+        }
       } finally {
-        setCheckingLink(false);
+        if (mounted) setCheckingLink(false);
       }
     }
 
-    // Expo Router may parse the deep-link parameters before React Native's
-    // Linking API delivers the original URL. Handle both paths to avoid losing
-    // the Supabase recovery code when the email opens through a browser first.
-    const first = (value?: string | string[]) => Array.isArray(value) ? value[0] : value;
-    const routeCode = first(routeParams.code);
-    const routeAccessToken = first(routeParams.access_token);
-    const routeRefreshToken = first(routeParams.refresh_token);
-    const routeType = first(routeParams.type);
-    const routeError = first(routeParams.error_description);
+    const first = (value?: string | string[]) =>
+      Array.isArray(value) ? value[0] : value;
 
-    if (routeError || routeCode || routeAccessToken || routeRefreshToken) {
+    const routeValues: Record<string, string | undefined> = {
+      code: first(routeParams.code),
+      token_hash: first(routeParams.token_hash),
+      access_token: first(routeParams.access_token),
+      refresh_token: first(routeParams.refresh_token),
+      type: first(routeParams.type),
+      error: first(routeParams.error),
+      error_code: first(routeParams.error_code),
+      error_description: first(routeParams.error_description)
+    };
+
+    if (Object.values(routeValues).some(Boolean)) {
       const params = new URLSearchParams();
-      if (routeCode) params.set("code", routeCode);
-      if (routeAccessToken) params.set("access_token", routeAccessToken);
-      if (routeRefreshToken) params.set("refresh_token", routeRefreshToken);
-      if (routeType) params.set("type", routeType);
-      if (routeError) params.set("error_description", routeError);
-      handleRecoveryUrl("fastchat://recovery?" + params.toString());
+      for (const [key, value] of Object.entries(routeValues)) {
+        if (value) params.set(key, value);
+      }
+      void handleRecoveryUrl("fastchat://recovery?" + params.toString());
     } else {
       Linking.getInitialURL().then(handleRecoveryUrl).catch(() => {
-        setCheckingLink(false);
+        if (mounted) setCheckingLink(false);
       });
     }
 
     const subscription = Linking.addEventListener("url", ({ url }) => {
-      setCheckingLink(true);
-      handleRecoveryUrl(url);
+      if (mounted) setCheckingLink(true);
+      void handleRecoveryUrl(url);
     });
-    return () => subscription.remove();
-  }, [routeParams.code, routeParams.access_token, routeParams.refresh_token, routeParams.type, routeParams.error_description]);
+
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, [
+    routeParams.code,
+    routeParams.token_hash,
+    routeParams.access_token,
+    routeParams.refresh_token,
+    routeParams.type,
+    routeParams.error,
+    routeParams.error_code,
+    routeParams.error_description
+  ]);
 
   async function updatePassword() {
     if (!supabase) {
@@ -163,27 +206,9 @@ export default function RecoveryScreen() {
               <Text style={styles.title}>Choisir un nouveau mot de passe</Text>
               <Text style={styles.subtitle}>Crée un mot de passe que tu n’as pas utilisé ailleurs.</Text>
               <Text style={styles.label}>Nouveau mot de passe</Text>
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder="6 caractères minimum"
-                placeholderTextColor="#999BB0"
-                style={styles.input}
-                secureTextEntry
-                autoCapitalize="none"
-                textContentType="newPassword"
-              />
+              <TextInput value={password} onChangeText={setPassword} placeholder="6 caractères minimum" placeholderTextColor="#999BB0" style={styles.input} secureTextEntry autoCapitalize="none" textContentType="newPassword" />
               <Text style={styles.label}>Confirmer le mot de passe</Text>
-              <TextInput
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                placeholder="Saisis-le une deuxième fois"
-                placeholderTextColor="#999BB0"
-                style={styles.input}
-                secureTextEntry
-                autoCapitalize="none"
-                textContentType="newPassword"
-              />
+              <TextInput value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Saisis-le une deuxième fois" placeholderTextColor="#999BB0" style={styles.input} secureTextEntry autoCapitalize="none" textContentType="newPassword" />
               <TouchableOpacity style={[styles.primaryButton, busy && styles.disabled]} onPress={updatePassword} disabled={busy}>
                 {busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryButtonText}>Enregistrer le nouveau mot de passe</Text>}
               </TouchableOpacity>
@@ -191,7 +216,7 @@ export default function RecoveryScreen() {
           ) : (
             <View style={styles.formCard}>
               <Text style={styles.title}>Lien non valide</Text>
-              <Text style={styles.subtitle}>Le lien a peut-être expiré ou ne s’est pas ouvert correctement. Retourne à la connexion et demande un nouvel e-mail.</Text>
+              <Text style={styles.subtitle}>Le lien n’a pas pu être vérifié. Retourne à la connexion et demande un nouvel e-mail.</Text>
               <TouchableOpacity style={styles.primaryButton} onPress={() => router.replace("/")}>
                 <Text style={styles.primaryButtonText}>Retour à la connexion</Text>
               </TouchableOpacity>

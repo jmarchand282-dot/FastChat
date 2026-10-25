@@ -129,6 +129,33 @@ export default function HomeScreen() {
     }
   }
 
+  async function sendPasswordRecovery() {
+    if (!supabase) {
+      Alert.alert("Configuration nécessaire", "FastChat n’est pas relié à Supabase.");
+      return;
+    }
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes("@")) {
+      Alert.alert("Adresse e-mail", "Entre d’abord l’adresse e-mail de ton compte.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+        redirectTo: "fastchat://recovery"
+      });
+      if (error) throw error;
+      Alert.alert(
+        "E-mail envoyé",
+        "Si cette adresse correspond à un compte, ouvre l’e-mail de récupération sur ce téléphone et appuie sur le lien. FastChat doit s’ouvrir pour te permettre de choisir un nouveau mot de passe."
+      );
+    } catch (error) {
+      Alert.alert("Envoi impossible", error instanceof Error ? error.message : "Une erreur est survenue.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function choosePhoto() {
     try {
       // Android's system photo picker does not require broad gallery permission.
@@ -263,6 +290,7 @@ export default function HomeScreen() {
             {mode === "signup" && <View style={styles.field}><Text style={styles.label}>Nom affiché</Text><TextInput value={displayName} onChangeText={setDisplayName} placeholder="Ex. Amina" placeholderTextColor="#999BB0" style={styles.input} autoCapitalize="words" maxLength={60} /></View>}
             <View style={styles.field}><Text style={styles.label}>Adresse e-mail</Text><TextInput value={email} onChangeText={setEmail} placeholder="toi@exemple.com" placeholderTextColor="#999BB0" style={styles.input} autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="emailAddress" /></View>
             <View style={styles.field}><Text style={styles.label}>Mot de passe</Text><TextInput value={password} onChangeText={setPassword} placeholder="6 caractères minimum" placeholderTextColor="#999BB0" style={styles.input} secureTextEntry autoCapitalize="none" textContentType={mode === "signup" ? "newPassword" : "password"} /></View>
+            {mode === "signin" && <TouchableOpacity style={styles.modeButton} onPress={sendPasswordRecovery} disabled={busy}><Text style={styles.modeText}>Mot de passe oublié ?</Text></TouchableOpacity>}
             <TouchableOpacity style={[styles.primaryButton, busy && styles.buttonDisabled]} onPress={submitAuth} disabled={busy}>{busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryButtonText}>{mode === "signup" ? "Créer mon compte" : "Se connecter"}</Text>}</TouchableOpacity>
             <TouchableOpacity style={styles.modeButton} onPress={() => setMode(mode === "signup" ? "signin" : "signup")} disabled={busy}><Text style={styles.modeText}>{mode === "signup" ? "Tu as déjà un compte ? Se connecter" : "Nouveau sur FastChat ? Créer un compte"}</Text></TouchableOpacity>
           </View>

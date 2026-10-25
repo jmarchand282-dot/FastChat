@@ -51,9 +51,9 @@ export default function RecoveryScreen() {
         const fragment = new URLSearchParams(parsed.hash.replace(/^#/, ""));
         const query = parsed.searchParams;
         const errorDescription = query.get("error_description") || fragment.get("error_description");
-        if (errorDescription) throw new Error(decodeURIComponent(errorDescription.replace(/\+/g, " ")));
+        if (errorDescription) throw new Error(errorDescription.replace(/\+/g, " "));
 
-        const code = query.get("code");
+        const code = query.get("code") || fragment.get("code");
         if (code && supabase) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
@@ -65,7 +65,7 @@ export default function RecoveryScreen() {
         const accessToken = fragment.get("access_token") || query.get("access_token");
         const refreshToken = fragment.get("refresh_token") || query.get("refresh_token");
         const type = fragment.get("type") || query.get("type");
-        if (!supabase || !accessToken || !refreshToken || (type && type !== "recovery")) {
+        if (!supabase || !accessToken || !refreshToken || type !== "recovery") {
           throw new Error("Le lien est incomplet ou a expiré. Demande un nouvel e-mail de récupération.");
         }
         const { error } = await supabase.auth.setSession({

@@ -13,7 +13,7 @@ import {
   View
 } from "react-native";
 import * as Linking from "expo-linking";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { supabase } from "../src/lib/supabase";
 
 const colors = {
@@ -33,6 +33,7 @@ export default function RecoveryScreen() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const handledUrls = useRef(new Set<string>());
+  const routeParams = useLocalSearchParams<{ code?: string | string[]; access_token?: string | string[]; refresh_token?: string | string[]; type?: string | string[]; error_description?: string | string[] }>();
 
   useEffect(() => {
     async function handleRecoveryUrl(url: string | null) {
@@ -84,15 +85,36 @@ export default function RecoveryScreen() {
       }
     }
 
-    Linking.getInitialURL().then(handleRecoveryUrl).catch(() => {
-      setCheckingLink(false);
-    });
+    // Expo Router may parse the deep-link parameters before React Native's
+    // Linking API delivers the original URL. Handle both paths to avoid losing
+    // the Supabase recovery code when the email opens through a browser first.
+    const first = (value?: string | string[]) => Array.isArray(value) ? value[0] : value;
+    const routeCode = first(routeParams.code);
+    const routeAccessToken = first(routeParams.access_token);
+    const routeRefreshToken = first(routeParams.refresh_token);
+    const routeType = first(routeParams.type);
+    const routeError = first(routeParams.error_description);
+
+    if (routeError || routeCode || routeAccessToken || routeRefreshToken) {
+      const params = new URLSearchParams();
+      if (routeCode) params.set("code", routeCode);
+      if (routeAccessToken) params.set("access_token", routeAccessToken);
+      if (routeRefreshToken) params.set("refresh_token", routeRefreshToken);
+      if (routeType) params.set("type", routeType);
+      if (routeError) params.set("error_description", routeError);
+      handleRecoveryUrl("fastchat://recovery?" + params.toString());
+    } else {
+      Linking.getInitialURL().then(handleRecoveryUrl).catch(() => {
+        setCheckingLink(false);
+      });
+    }
+
     const subscription = Linking.addEventListener("url", ({ url }) => {
       setCheckingLink(true);
       handleRecoveryUrl(url);
     });
     return () => subscription.remove();
-  }, []);
+  }, [routeParams.code, routeParams.access_token, routeParams.refresh_token, routeParams.type, routeParams.error_description]);
 
   async function updatePassword() {
     if (!supabase) {

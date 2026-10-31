@@ -32,6 +32,7 @@ export default function RecoveryScreen() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [linkDiagnostic, setLinkDiagnostic] = useState("En attente du lien de récupération.");
   const handledUrls = useRef(new Set<string>());
   const routeParams = useLocalSearchParams<{
     code?: string | string[];
@@ -48,8 +49,11 @@ export default function RecoveryScreen() {
     let mounted = true;
 
     async function handleRecoveryUrl(url: string | null) {
-      if (!url || !mounted || handledUrls.current.has(url)) return;
+      if (!mounted) return;
+      if (!url) { setLinkDiagnostic("Aucune adresse de récupération reçue par Android."); setCheckingLink(false); setValidLink(false); return; }
+      if (handledUrls.current.has(url)) return;
       handledUrls.current.add(url);
+      setLinkDiagnostic("Adresse reçue. Vérification des paramètres…");
 
       try {
         // Parse both the query string and fragment. Some email clients/browser
@@ -67,8 +71,8 @@ export default function RecoveryScreen() {
         const code = get("code");
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
-          if (error) throw error;
-          if (mounted) setValidLink(true);
+          if (error) throw new Error("Supabase a refusé le code : " + error.message);
+          if (mounted) { setLinkDiagnostic("Code accepté par Supabase."); setValidLink(true); }
           return;
         }
 
@@ -80,8 +84,8 @@ export default function RecoveryScreen() {
             token_hash: tokenHash,
             type: "recovery"
           });
-          if (error) throw error;
-          if (mounted) setValidLink(true);
+          if (error) throw new Error("Supabase a refusé le jeton : " + error.message);
+          if (mounted) { setLinkDiagnostic("Jeton accepté par Supabase."); setValidLink(true); }
           return;
         }
 
@@ -92,20 +96,16 @@ export default function RecoveryScreen() {
             access_token: accessToken,
             refresh_token: refreshToken
           });
-          if (error) throw error;
-          if (mounted) setValidLink(true);
+          if (error) throw new Error("Supabase a refusé la session : " + error.message);
+          if (mounted) { setLinkDiagnostic("Session acceptée par Supabase."); setValidLink(true); }
           return;
         }
 
-        throw new Error(
-          "FastChat n’a reçu aucun code de récupération utilisable. Demande un nouvel e-mail et ouvre son lien sur ce téléphone."
-        );
+        const found = ["code", "token_hash", "access_token", "refresh_token", "type", "error", "error_code", "error_description"].filter((key) => get(key));
+        throw new Error(found.length ? "Paramètres reçus : " + found.join(", ") + ". Aucun code ou jeton valide." : "Aucun paramètre de récupération reçu dans le lien Android.");
       } catch (error) {
         if (mounted) {
-          Alert.alert(
-            "Lien de récupération invalide",
-            error instanceof Error ? error.message : "Ouvre le lien reçu par e-mail sur ce téléphone, puis réessaie."
-          );
+          setLinkDiagnostic(error instanceof Error ? error.message : "Erreur inconnue pendant la vérification.");
           setValidLink(false);
         }
       } finally {
@@ -127,6 +127,12 @@ export default function RecoveryScreen() {
       error_description: first(routeParams.error_description)
     };
 
+    // Listen before getInitialURL so Android cannot deliver and lose the deep link in between.
+    const subscription = Linking.addEventListener("url", ({ url }) => {
+      if (mounted) setCheckingLink(true);
+      void handleRecoveryUrl(url);
+    });
+
     if (Object.values(routeValues).some(Boolean)) {
       const params = new URLSearchParams();
       for (const [key, value] of Object.entries(routeValues)) {
@@ -134,15 +140,13 @@ export default function RecoveryScreen() {
       }
       void handleRecoveryUrl("fastchat://recovery?" + params.toString());
     } else {
-      Linking.getInitialURL().then(handleRecoveryUrl).catch(() => {
-        if (mounted) setCheckingLink(false);
+      Linking.getInitialURL().then(handleRecoveryUrl).catch((error) => {
+        if (mounted) {
+          setLinkDiagnostic(error instanceof Error ? error.message : "Impossible de lire le lien Android.");
+          setCheckingLink(false);
+        }
       });
     }
-
-    const subscription = Linking.addEventListener("url", ({ url }) => {
-      if (mounted) setCheckingLink(true);
-      void handleRecoveryUrl(url);
-    });
 
     return () => {
       mounted = false;
@@ -216,7 +220,7 @@ export default function RecoveryScreen() {
           ) : (
             <View style={styles.formCard}>
               <Text style={styles.title}>Lien non valide</Text>
-              <Text style={styles.subtitle}>Le lien n’a pas pu être vérifié. Retourne à la connexion et demande un nouvel e-mail.</Text>
+              <Text style={styles.subtitle}>Le lien n’a pas pu être vérifié.\n{linkDiagnostic}\nRetourne à la connexion et demande un nouvel e-mail.</Text>
               <TouchableOpacity style={styles.primaryButton} onPress={() => router.replace("/")}>
                 <Text style={styles.primaryButtonText}>Retour à la connexion</Text>
               </TouchableOpacity>

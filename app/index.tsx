@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { router } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
@@ -232,6 +233,8 @@ export default function HomeScreen() {
   }
 
   if (session) {
+    router.replace("/chat");
+    return null;
     const name = profileName || String(session.user.user_metadata?.display_name || session.user.email || "Utilisateur");
     const shownPhoto = localPhotoUri || avatarUrl;
     return (
